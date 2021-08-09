@@ -118,4 +118,15 @@
 	return operation;
 }
 
+
+static NSString * _youTubeAPIKey = nil;
+
++ (NSString *) youTubeAPIKey {
+	return _youTubeAPIKey;
+}
++ (void)setYouTubeAPIKey: (NSString *) key {
+	_youTubeAPIKey = key;
+}
+
+
 @end

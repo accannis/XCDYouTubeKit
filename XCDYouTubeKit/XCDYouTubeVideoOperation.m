@@ -12,6 +12,7 @@
 #import "XCDYouTubeDashManifestXML.h"
 #import "XCDYouTubePlayerScript.h"
 #import "XCDYouTubeLogger+Private.h"
+#import "XCDYouTubeClient.h"
 
 typedef NS_ENUM(NSUInteger, XCDYouTubeRequestType) {
 	XCDYouTubeRequestTypeGetVideoInfo = 1,
@@ -146,13 +147,31 @@ static NSError *YouTubeError(NSError *error, NSSet *regionsAllowed, NSString *la
 	}
 	else
 	{
-		NSString *eventLabel = [self.eventLabels objectAtIndex:0];
+//		NSString *eventLabel = [self.eventLabels objectAtIndex:0];
 		[self.eventLabels removeObjectAtIndex:0];
 		
-        NSDictionary *query = @{ @"video_id": self.videoIdentifier, @"hl": self.languageIdentifier, @"el": eventLabel, @"ps": @"default", @"html5" : @"1", @"eurl": [@"https://youtube.googleapis.com/v/" stringByAppendingString:self.videoIdentifier],@"c": @"TVHTML5", @"cver": @"6.20180913"};
-		NSString *queryString = XCDQueryStringWithDictionary(query);
-		NSURL *videoInfoURL = [NSURL URLWithString:[@"https://www.youtube.com/get_video_info?" stringByAppendingString:queryString]];
-		[self startRequestWithURL:videoInfoURL type:XCDYouTubeRequestTypeGetVideoInfo];
+//        NSDictionary *query = @{ @"video_id": self.videoIdentifier, @"hl": self.languageIdentifier, @"el": eventLabel, @"ps": @"default", @"html5" : @"1", @"eurl": [@"https://youtube.googleapis.com/v/" stringByAppendingString:self.videoIdentifier],@"c": @"TVHTML5", @"cver": @"6.20180913"};
+//		NSString *queryString = XCDQueryStringWithDictionary(query);
+//		NSURL *videoInfoURL = [NSURL URLWithString:[@"https://www.youtube.com/get_video_info?" stringByAppendingString:queryString]];
+//		[self startRequestWithURL:videoInfoURL type:XCDYouTubeRequestTypeGetVideoInfo];
+		
+		NSString *urlString = [NSString stringWithFormat:@"https://youtubei.googleapis.com/youtubei/v1/player?key=%@", XCDYouTubeClient.youTubeAPIKey];
+		NSURL *url = [NSURL URLWithString:urlString];
+
+		NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:10];
+
+		[request setHTTPMethod:@"POST"];
+
+		NSString *string = [NSString stringWithFormat:@"{'context': {'client': {'hl': 'en','clientName': 'WEB','clientVersion': '2.20210721.00.00','mainAppWebInfo': {'graftUrl': '/watch?v=%@'}}},'videoId': '%@'}", self.videoIdentifier, self.videoIdentifier];
+
+		NSData *postData = [string dataUsingEncoding:NSASCIIStringEncoding];
+
+		[request setHTTPBody:postData];
+
+		[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+
+		[self startRequestWith:request type:XCDYouTubeRequestTypeGetVideoInfo];
+
 	}
 }
 
@@ -205,6 +224,40 @@ static NSError *YouTubeError(NSError *error, NSSet *regionsAllowed, NSString *la
 	
 	self.requestType = requestType;
 }
+
+- (void) startRequestWith:(NSMutableURLRequest *)request type:(XCDYouTubeRequestType)requestType
+ {
+	if (self.isCancelled)
+		return;
+
+	// Max (age-restricted VEVO) = 2×GetVideoInfo + 1×WatchPage + 2×EmbedPage + 1×JavaScriptPlayer + 1×GetVideoInfo + 1xDashManifest
+	if (++self.requestCount > 8)
+	{
+		// This condition should never happen but the request flow is quite complex so better abort here than go into an infinite loop of requests
+		[self finishWithError];
+		return;
+	}
+
+	XCDYouTubeLogDebug(@"Starting request: %@", [request URL]);
+
+	[request setValue:self.languageIdentifier forHTTPHeaderField:@"Accept-Language"];
+	[request setValue:[NSString stringWithFormat:@"https://youtube.com/watch?v=%@", self.videoIdentifier] forHTTPHeaderField:@"Referer"];
+
+	self.dataTask = [self.session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error)
+	{
+		if (self.isCancelled)
+			return;
+
+		if (error)
+			[self handleConnectionError:error requestType:requestType];
+		else
+			[self handleConnectionSuccessWithData:data response:response requestType:requestType];
+	}];
+	[self.dataTask resume];
+
+	self.requestType = requestType;
+ }
+
 
 #pragma mark - Response Dispatch
 
